@@ -1,58 +1,163 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# 🔐 HomePass
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Cofre de credenciais e gerenciador de segredos **self-hosted**, feito pra rodar num notebook-servidor doméstico e ser acessado com segurança pela rede privada do **Tailscale**. Estilo Bitwarden/1Password pessoal, leve e sob seu controle.
 
-## About Laravel
+> ⚠️ **Não é pra ficar exposto na internet pública.** O acesso é pensado pra rede VPN privada (Tailscale). Veja a seção [Deploy](#-deploy-no-servidor).
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## ✨ Funcionalidades
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- **Cofre de senhas** — guarda credenciais (título, categoria, usuário, senha, URL/IP, notas).
+- **Criptografia automática (zero-knowledge)** — `password` e `notes` são gravados **criptografados** (AES-256) no banco, nunca em texto puro.
+- **Links autodestrutivos** *(em construção)* — URLs assinadas e temporárias pra compartilhar um segredo; ao ser aberto uma vez, o registro é exibido e apagado na hora.
+- **SPA moderna** — Inertia.js + React, com Tailwind e Dark Mode.
 
-## Learning Laravel
+## 🛠️ Stack
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+| Camada | Tecnologia |
+|---|---|
+| Backend | Laravel 13 (PHP 8.3+, roda em PHP 8.5 no container) |
+| Frontend | Inertia.js + React 18 + Tailwind CSS (via Vite 8) |
+| Auth | Laravel Breeze |
+| Banco | MySQL 8.4 (em container) |
+| Cache/Fila | Driver `database` (Redis opcional, hoje não usado) |
+| Ambiente | Docker via Laravel Sail |
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+---
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+## 🔒 Segurança — leia isto
 
-## Agentic Development
+### A `APP_KEY` é a chave do cofre. Literalmente.
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+Os campos sensíveis são criptografados com a `APP_KEY` do `.env` (configurado via `$casts` no model `Credential`). Isso significa:
+
+- **Se você perder a `APP_KEY`, perde o acesso a todas as senhas guardadas.** Não tem recuperação.
+- **Se copiar o banco de uma máquina pra outra**, a `APP_KEY` **tem que ser idêntica** nas duas — senão os dados não descriptografam.
+- **Guarde a `APP_KEY` num lugar seguro** (ex: outro gerenciador de senhas). O `.env` **não vai pelo Git** (está no `.gitignore`).
+
+### Rede
+
+O `.env` de produção deve ter `APP_DEBUG=false` (com `true`, um erro vaza stack trace com dados sensíveis) e o acesso deve ser restrito ao Tailscale — não publique a porta pra internet.
+
+---
+
+## ✅ Pré-requisitos
+
+- **Docker Desktop** (Windows/Mac) ou **Docker Engine + Compose** (Linux), rodando.
+- Só isso. PHP, Node e MySQL rodam todos dentro dos containers.
+
+> **Windows:** os comandos abaixo usam `docker compose exec` direto (funciona no PowerShell).
+> No Mac/Linux/WSL você pode usar o atalho `./vendor/bin/sail <comando>` no lugar de `docker compose exec laravel.test <comando>`.
+
+---
+
+## 🚀 Como rodar (do zero, numa máquina nova)
+
+Como `vendor/` e `node_modules/` **não vão pelo Git**, num clone novo é preciso instalá-los antes.
 
 ```bash
-composer require laravel/boost --dev
+git clone <seu-repo> homepass
+cd homepass
 
-php artisan boost:install
+# 1. Instalar as dependências PHP SEM precisar de PHP na máquina
+#    (usa um container temporário só pra rodar o composer)
+docker run --rm -v "${PWD}:/var/www/html" -w /var/www/html \
+  laravelsail/php83-composer:latest \
+  composer install --ignore-platform-reqs
+
+# 2. Criar o .env
+cp .env.example .env
+
+# 3. Subir a infra (app na :80 + mysql interno). A 1ª vez baixa a imagem.
+docker compose up -d --build
+
+# 4. Configurar o app (dentro do container)
+docker compose exec laravel.test php artisan key:generate   # ⚠️ ver aviso da APP_KEY
+docker compose exec laravel.test php artisan migrate
+docker compose exec laravel.test npm install
+docker compose exec laravel.test npm run build
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Pronto: acesse **http://localhost** e crie sua conta.
 
-## Contributing
+> **Já tem PHP + Composer + Node na máquina?** Dá pra usar o atalho `composer setup` (roda tudo isso de uma vez) — mas o caminho via Docker acima é o recomendado por não depender de nada instalado.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+### Desenvolvimento no dia a dia
 
-## Code of Conduct
+Pra desenvolver com **hot reload** do front, deixe o Vite rodando em vez do `build`:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```bash
+docker compose exec laravel.test npm run dev
+```
 
-## Security Vulnerabilities
+---
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## 🧰 Comandos úteis
 
-## License
+```bash
+docker compose up -d          # subir
+docker compose down           # parar (mantém os dados)
+docker compose down -v        # parar E APAGAR o banco (cuidado!)
+docker compose ps             # status dos containers
+docker compose logs -f laravel.test
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+# Artisan / Composer / NPM dentro do container:
+docker compose exec laravel.test php artisan migrate
+docker compose exec laravel.test php artisan tinker
+docker compose exec laravel.test composer require <pacote>
+docker compose exec laravel.test npm run dev
+```
+
+---
+
+## 🗄️ Como o banco está configurado (e por quê)
+
+O MySQL roda **em container**, definido no `compose.yaml`, e **de propósito não publica a porta 3306 no host**. Motivo: muitas máquinas já têm um MySQL nativo ocupando a 3306, e publicar geraria conflito (`bind: address already in use`). O app conversa com o banco pela **rede interna do Docker** (`DB_HOST=mysql`), então não precisa da porta exposta.
+
+- Quer inspecionar o banco pelo Workbench/DBeaver? Descomente o bloco `ports:` do serviço `mysql` no `compose.yaml` (sugestão: mapear em `3307:3306` pra não colidir) e suba de novo.
+- Os dados vivem no volume Docker `sail-mysql`. **Faça backup dele** — é onde mora o cofre. Ex: `docker compose exec mysql mysqldump -usail -ppassword homepass > backup.sql`.
+
+---
+
+## 🌐 Deploy no servidor
+
+O mesmo `compose.yaml` roda no servidor (Windows, Mac ou Linux). Checklist do que muda:
+
+1. **`.env` de produção** (não vem pelo Git — crie na máquina):
+   ```env
+   APP_ENV=production
+   APP_DEBUG=false
+   APP_URL=http://100.x.x.x   # IP/hostname do Tailscale (usado nos links assinados!)
+   DB_PASSWORD=<senha_forte>  # troque o "password" padrão
+   ```
+2. **`APP_KEY`** — gere com `key:generate`, ou reutilize a mesma se for migrar dados de outra máquina (ver [Segurança](#-segurança--leia-isto)).
+3. **Sail é dependência de dev.** Se rodar `composer install --no-dev`, o Dockerfile do Sail some e o build quebra. Instale **com** as dev deps (ou monte um Dockerfile de produção próprio).
+4. **Assets de produção:** `npm ci && npm run build` (não `npm run dev`). Depois `php artisan migrate --force` e `php artisan optimize`.
+5. **Rede blindada:** o compose publica a porta 80 em `0.0.0.0` (toda a LAN alcança). Pra restringir ao Tailscale, amarre o mapeamento no IP do Tailscale (`100.x.x.x:80:80`) ou feche no firewall. HTTPS fácil com `tailscale serve`.
+6. **Backup** do volume `sail-mysql` (o cofre criptografado).
+
+### Redis (opcional)
+
+Hoje os drivers de cache/fila/sessão são `database` — **Redis não é usado**, e pra um cofre pessoal isso é suficiente. Se quiser usar um Redis que já roda no host: `REDIS_HOST=host.docker.internal` e troque `CACHE_STORE`/`QUEUE_CONNECTION`/`SESSION_DRIVER` para `redis`.
+
+---
+
+## 🩹 Troubleshooting
+
+| Sintoma | Causa / solução |
+|---|---|
+| `bind: address already in use` na porta 3306 ao subir | Já resolvido: o MySQL do container não publica porta. Se voltar a acontecer, é porque alguém reativou o bloco `ports:` do `mysql` e há outro MySQL na 3306. |
+| `ViteManifestNotFoundException` / erro 500 na home | Faltou buildar o front. Rode `npm run dev` (dev) ou `npm run build` (prod). |
+| `Cannot find module '...rolldown-binding.linux-x64-gnu.node'` no build | Bug do npm com deps opcionais do Vite 8. Solução: `docker compose exec laravel.test sh -c "rm -rf node_modules package-lock.json && npm install"`. |
+| `npm install` quebra em peer dependency (vite/plugin-react) | Já corrigido no `package.json` (plugin-react ^6, compatível com Vite 8). Garanta que puxou a versão atualizada. |
+
+---
+
+## 🧭 Roadmap (onde paramos)
+
+- [x] Model `Credential` com criptografia (`password`, `notes`) + migration.
+- [x] Ambiente Docker (Sail) com MySQL em container, sem conflito de porta.
+- [ ] Telas React em `resources/js/Pages/` para o CRUD de credenciais (listar, criar, editar, deletar).
+- [ ] `CredentialController` recebendo as requisições via Inertia.
+- [ ] Gerador de links assinados que se autodestroem após o primeiro acesso.
