@@ -47,8 +47,8 @@ O `.env` de produção deve ter `APP_DEBUG=false` (com `true`, um erro vaza stac
 - **Docker Desktop** (Windows/Mac) ou **Docker Engine + Compose** (Linux), rodando.
 - Só isso. PHP, Node e MySQL rodam todos dentro dos containers.
 
-> **Windows:** os comandos abaixo usam `docker compose exec` direto (funciona no PowerShell).
-> No Mac/Linux/WSL você pode usar o atalho `./vendor/bin/sail <comando>` no lugar de `docker compose exec laravel.test <comando>`.
+> **Windows:** o jeito **recomendado** é rodar tudo dentro do **WSL2 (Ubuntu)** — o Sail funciona nativo, o I/O é bem mais rápido e o hot reload fica instantâneo. Veja [Windows: rodar via WSL2](#-windows-rodar-via-wsl2-recomendado).
+> No PowerShell puro também funciona: troque `./vendor/bin/sail <comando>` por `docker compose exec laravel.test <comando>`.
 
 ---
 
@@ -90,6 +90,44 @@ Pra desenvolver com **hot reload** do front, deixe o Vite rodando em vez do `bui
 ```bash
 docker compose exec laravel.test npm run dev
 ```
+
+---
+
+## 🪟 Windows: rodar via WSL2 (recomendado)
+
+No Windows, rode tudo dentro do **WSL2 (Ubuntu)** em vez do PowerShell. Assim o `./vendor/bin/sail` funciona nativo, o I/O fica muito mais rápido e o hot reload do Vite fica instantâneo (sem precisar de polling).
+
+> ⚠️ **Ponto crítico:** o projeto tem que morar **dentro do filesystem do Linux** (ex: `~/projetos/homepass`), **não** em `C:\...` acessado via `/mnt/c/...`. No `/mnt/c` você tem o pior dos dois mundos: lento *e* com o hot reload quebrado.
+
+1. **Instalar o Ubuntu** (no PowerShell):
+   ```powershell
+   wsl --install -d Ubuntu
+   ```
+   Crie o usuário e a senha do Linux quando ele pedir (a senha é a do `sudo`).
+
+2. **Ligar a integração** em **Docker Desktop → Settings → Resources → WSL Integration**: habilite o Ubuntu e dê *Apply & Restart*.
+
+3. **Rodar o projeto dentro do home do Linux** (no terminal do Ubuntu):
+   ```bash
+   mkdir -p ~/projetos && cd ~/projetos
+   git clone https://github.com/NewMatheusED/homepass.git
+   cd homepass
+   cp .env.example .env
+
+   # instala as deps PHP via container (sem precisar de PHP no Ubuntu)
+   docker run --rm -v "$PWD:/var/www/html" -w /var/www/html \
+     laravelsail/php83-composer:latest composer install --ignore-platform-reqs
+
+   ./vendor/bin/sail up -d --build
+   ./vendor/bin/sail artisan key:generate   # ⚠️ ver aviso da APP_KEY
+   ./vendor/bin/sail artisan migrate
+   ./vendor/bin/sail npm install
+   ./vendor/bin/sail npm run dev
+   ```
+
+Acesse **http://localhost**. No dia a dia é só `./vendor/bin/sail up -d` + `./vendor/bin/sail npm run dev`.
+
+> Abra a pasta no editor **conectado ao WSL** (VS Code: extensão "WSL"; ou abra o editor a partir do terminal do Ubuntu). Não edite pelo caminho `\\wsl$\...` no Windows se puder evitar.
 
 ---
 
@@ -151,6 +189,9 @@ Hoje os drivers de cache/fila/sessão são `database` — **Redis não é usado*
 | `ViteManifestNotFoundException` / erro 500 na home | Faltou buildar o front. Rode `npm run dev` (dev) ou `npm run build` (prod). |
 | `Cannot find module '...rolldown-binding.linux-x64-gnu.node'` no build | Bug do npm com deps opcionais do Vite 8. Solução: `docker compose exec laravel.test sh -c "rm -rf node_modules package-lock.json && npm install"`. |
 | `npm install` quebra em peer dependency (vite/plugin-react) | Já corrigido no `package.json` (plugin-react ^6, compatível com Vite 8). Garanta que puxou a versão atualizada. |
+| `docker-credential-desktop.exe: exec format error` ao rodar `docker`/`pull` no WSL | O Docker do Linux tenta usar o cred helper `.exe` do Windows. Solução: edite `~/.docker/config.json` e deixe só `{}` (imagens públicas não precisam de login). |
+| `syntax error, unexpected token "{"` no fim do `composer install` (via imagem `php83-composer`) | Inofensivo: é só o `artisan package:discover` rodando sob PHP 8.3; o Laravel 13 usa sintaxe 8.4/8.5. O `vendor/` é instalado normalmente e o artisan roda certo dentro do container (PHP 8.5). |
+| Alteração no `.jsx`/front não atualiza sozinha | O watcher não recebe os eventos pelo bind mount do Windows. Rode via WSL2 (recomendado) ou suba o Vite com `VITE_USE_POLLING=true ./vendor/bin/sail npm run dev`. |
 
 ---
 
