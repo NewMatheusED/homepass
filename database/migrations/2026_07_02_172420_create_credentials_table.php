@@ -12,6 +12,7 @@ return new class extends Migration {
     {
         Schema::create("credentials", function (Blueprint $table) {
             $table->id();
+            $table->foreignId("user_id")->constrained()->cascadeOnDelete();
             $table->string("title");
             $table->string("category")->nullable();
             $table->string("username")->nullable();
